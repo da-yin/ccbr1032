@@ -1,0 +1,65 @@
+---
+title: "ccbr1032_heatmap"
+author: "Da"
+date: "4/27/2020"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+First make sure these libraries are installed
+```{r}
+library(stringr)
+library(dplyr)
+library(ComplexHeatmap)
+```
+
+Second set the analysis directory, download the IPA pathway file. 
+```{r}
+setwd("~/Desktop/active_projects/ccbr1032/analysis/")
+ipa = read.csv("processedData/IPA/lmp.ola_ctrl_Canonical_923.csv", header = T, stringsAsFactors = F)
+counts = read.table("processedData/normalized/limma_Voom_normalized_LMP.Olap_923-Ctrl_923_data.txt", header = T,stringsAsFactors = F)
+counts$symbol = gsub(".*[|]", "", rownames(counts))
+```
+
+Third input the pathway of interest, e.g. "PPARα/RXRα Activation" 
+```{r}
+#pathway of interest
+poi= "PPARα/RXRα Activation"
+poi_genes = ipa[which(ipa$Ingenuity.Canonical.Pathways==poi), c("Molecules")]
+
+poi_genes = str_split(poi_genes, ",")  %>% unlist() %>% as.vector()
+poi_counts = counts[which(counts$symbol%in%poi_genes),]
+rownames(poi_counts) = poi_counts$symbol
+poi_counts$symbol = NULL
+
+```
+
+Fourth create a heatmap showing the expresson of genes in the the pathway
+```{r}
+mat = poi_counts
+
+ComplexHeatmap::Heatmap(matrix = t(scale(t(data.matrix(mat)))), name="Z-score", km=1, 
+                        col=colorRampPalette(c("darkblue","grey","darkred"))(256), 
+                        row_names_gp = gpar(fontsize = ifelse(nrow(mat) <= 30, 10, 
+                                                       ifelse(30<nrow(mat)&nrow(mat) <= 45, 7,
+                                                       ifelse(45<nrow(mat)&nrow(mat) <= 60, 5, 4))), 
+                                            fontface = "bold"),
+                        column_names_gp = gpar(fontsize = 10, fontface = "bold"),
+                        cluster_columns = T ,column_title_gp = gpar(fontsize = 10, fontface = "bold"), 
+                        column_names_rot = 65, width = unit(5, "cm"),
+                        column_title = poi, column_title_side = "top") 
+
+
+pdf(file = )
+
+
+
+```
+
+

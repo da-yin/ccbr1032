@@ -1,0 +1,829 @@
+---
+title: "Untitled"
+author: "Da"
+date: "4/6/2020"
+output: html_document
+---
+
+RNA-seq data analysis - human glioblastoma treatment using LMP400 and Olaparib
+=======================
+
+Data source
+-----------
+Jing Wu Lab at NIH.
+44 patient-derived human glioblastoma mRNA samples sequenced at Sequencing Facility on NextSeq using Illumina TruSeq Stranded mRNA Library Prep and paired-end sequencing.
+
+
+Folder structure
+-----------
+
+```
+.
+├── rawData                  # raw data
+|   ├── RawCountFile         # raw count file from Sequencing Facility
+|   ├── sample info          # sample metadata table from Madison Butler
+│   ├── filteredCounts       # filtered gene counts generated using EdgeR filterByExpr 
+│       ├── filtered         # keeps genes that have a CPM of 0.2 or more in at least three samples
+|       ├── sampletable      # sampletable.txt has metadata including sampleName, fileName, condition and label.
+├── analysis                 # analysis folder that contains script and results
+│   ├── processedData        # Intermediate text result files
+|       ├── DEGs             # Gene differential expression generated using Limma Voom. 
+|       ├── normalized       # Voom quantile normalized, batch-corrected counts
+|       ├── IPA              # DEG gene IDs, FC, P value tables, input for IPA
+|       ├── ORA_GSEA         # Gene Set Enrichment Analysis using GO BP, KEGG, Reactome gene sets database
+|           ├──.*csv         # significant pathways(Padjust < 0.05) and the genes involved in these pathways
+|           ├──.*pdf         # dotplot of top 10 significant pathways
+│   ├── results              # various plots                    
+|       ├── glimma-plots     # Interactive differential expression gene plot
+|       ├── PCA              # PCA plot for each contrast generated using normalized, batch-corrected counts
+|       ├── heatmap          # DEGs for each contrast
+|       ├── venn             # overlap of DEGs for each drug treatment
+|       ├── volcano          # visualizing significant DEGs, log2 > 1 or < -1; -log10FDR > 1.3 (FDR<0.05)
+|       ├── pathview         # visualizing significant DEGs in a KEGG pathway
+|       ├── pathways         # overlap of significant pathways and their net enrichment score
+│   ├── *.Rmd                # R scripts 
+│   ├── *.html               # Rmarkdown html knit file
+├── reports                  # Powerpoing presentation, MultiQC report from SF
+├── ref                      # methods and references
+├── readme.md                # analysis objectives and summary                       
+└── ...
+```
+
+
+
+Objectives
+--------
+
+- Generate differential expression using Limma Voom.
+- Perform over-representation analysis(ORA) and Gene Set Enrichment Analysis (GSEA) using Clusterprofiler.
+- Difference in response between GSC cells vs. SF cells
+- What response/results are consistent in both GSC923 and GSC827
+- Investigate the genes and pathways regulated by drug combinations.
+- identify potential genes/pathways that drive Tivozanib resistance.
+
+
+---
+
+Summary
+--------
+
+Our goal is to use RNA sequencing to investigate the expression changes in pathways such as DNA damage, DNA repair, cell cycle signaling, and apoptosis after treatment with a drug combination. We are using established and patient-derived human glioblastoma (brain tumor) cell lines, and treating with a drug combination that induces DNA damage, cell cycle arrest, and apoptosis. Additionally, RNA-Seq would also allow us to observe expression changes in additional pathways which could lead to identification of novel mechanisms of drug action, which we are interested in as well.
+
+Cell lines:
+
+- GSC923
+- GSC827
+- SF10417
+- SF10602
+
+
+Contrast:
+
+- treated-Ctrl(Olaparib, LMP400, LMP400+Olaparib Vs. Control): GSC923(GSC827, SF10417, SF10602)
+- Ola – Ctrl(Olaparib Vs. Control): GSC923(GSC827, SF10417, SF10602)
+- LMP – Ctrl(LMP400 Vs. Control): GSC923(GSC827, SF10417, SF10602)
+- LMP.Olap - Ctrl(LMP400+Olaparib Vs. Control): GSC923(GSC827, SF10417, SF10602)
+- LMP.Olap – Ola(LMP400+Olaparib Vs. Olaparib): GSC923(GSC827, SF10417, SF10602)
+- LMP.Olap – LMP(LMP400+Olaparib Vs. LMP400): GSC923(GSC827, SF10417, SF10602)
+
+
+The Limma package was used to test for differential gene expression between experimental conditions. Batch ID
+was added as a covariate in the linear modeling.Significant differentially expressed genes were identified with a false-discovery rate ≤ 0.05 and a log(fold change) > 1. 
+
+DEGs:
+
+- LMP_417-Ctrl_417 : 0
+- LMP_602-Ctrl_602 : 41
+- LMP_827-Ctrl_827 : 0
+- LMP_923-Ctrl_923 : 38
+- LMP.Olap_417-Ctrl_417 : 0
+- LMP.Olap_417-LMP_417 : 0
+- LMP.Olap_417-Ola_417 : 0
+- LMP.Olap_602-Ctrl_602 : 88
+- LMP.Olap_602-LMP_602 : 23
+- LMP.Olap_602-Ola_602 : 82
+- LMP.Olap_827-Ctrl_827 : 0
+- LMP.Olap_827-LMP_827 : 0
+- LMP.Olap_827-Ola_827 : 41
+- LMP.Olap_923-Ctrl_923 : 415
+- LMP.Olap_923-LMP_923 : 68
+- LMP.Olap_923-Ola_923 : 222
+- Ola_417-Ctrl_417 : 0
+- Ola_602-Ctrl_602 : 15
+- Ola_827-Ctrl_827 : 0
+- Ola_923-Ctrl_923 : 1
+- treated_417-Ctrl_417 : 0
+- treated_602-Ctrl_602 : 1
+- treated_827-Ctrl_827 : 0
+- treated_923-Ctrl_923 : 0
+
+Pathway enrichment was performed using pre-ranked Gene Set Enrichment Analysis (GSEA) with the KEGG, Reactome and BP genesets from the Molecular Signatures Database. 
+
+For GSEA, the genes for each contrast are ordered in a ranked list based on gsea_ranking_score, -log10(pvalue)*sign(log2fc). GSEA analysis reveals significant inhibition or up-regulation of gene sets. On the x-axis, the genes are ranked from the most up-regulated (left end) to the most down-regulated (right end). The “barcode” indicates the position of the genes from the biological pathway. The y-axis shows a running enrichment score (ES), which goes up when genes are encountered in the pathway and goes down otherwise—leading to an assessment of the distribution within the set of all genes. ES reflects the degree to which a set S(e.g Apoptosis) is overrepresented at the extremes.The normalized enrichment score (NES) is inferred from permutations of the gene set and the false discovery rate (FDR). NES is normalized enrichment score which account for the size of the set. Negative NES means the down-regulation and positve value means up-regulation. (ref Subramanian et al. PNAS 2005) 
+
+
+IPA was performed and anaysis results shared with collaborator using their Email addresses.
+
+
+CCBR contact
+--------
+Da Yin: yind3@nih.gov
+Vishal Koparde: vishal.koparde@nih.gov
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r}
+library(RUVSeq)
+library(DESeq2)
+suppressMessages(library('edgeR'))
+suppressMessages(library('statmod'))
+suppressMessages(library(gplots))
+suppressMessages(library('reshape'))
+suppressMessages(library('limma'))
+suppressMessages(library('geneplotter'))
+suppressMessages(library(filesstrings))
+suppressMessages(library(ff))
+suppressMessages(library(Glimma))
+suppressMessages(library(dplyr))
+suppressMessages(library(RColorBrewer))
+suppressMessages(library(pheatmap))
+suppressMessages(library(clusterProfiler))
+suppressMessages(library(argparse))
+suppressMessages(library(org.Hs.eg.db))
+suppressMessages(library(org.Mm.eg.db))
+suppressMessages(library(ReactomePA))
+suppressMessages(library(ggplot2))
+suppressMessages(library(EnhancedVolcano))
+suppressMessages(library(ggfortify))
+suppressMessages(library(ggrepel))
+suppressMessages(library(VennDiagram))
+suppressMessages(library(biomaRt))
+suppressMessages(library(enrichplot))
+suppressMessages(library(gridExtra))
+suppressMessages(library(gplots))
+library("factoextra")
+library(DescTools)
+library(DT)
+
+theme_set(theme_classic())
+```
+
+```{r}
+setwd("~/Desktop/active_projects/ccbr1032/analysis/")
+analysis_dir = "~/Desktop/active_projects/ccbr1032/analysis/"
+results_dir = "~/Desktop/active_projects/ccbr1032/analysis/results/"
+DEGs_dir = "~/Desktop/active_projects/ccbr1032/analysis/processedData/DEGs/"
+normalized_data_dir = "~/Desktop/active_projects/ccbr1032/analysis/processedData/normalized/"
+path_out = "~/Desktop/active_projects/ccbr1032/analysis/processedData/ORA_GSEA/"
+
+writeFile = function(data, name){
+  fileName = paste(path_out, name, sep='')
+  write.csv(data, fileName)
+}
+```
+
+
+```{r}
+myRUVseq = function(sample.dir, limma_DEG, number_of_genes_as_control){
+  x = read.table(paste0("~/Desktop/active_projects/ccbr1032/rawData/filteredCounts/",sample.dir,"/sampletable.txt"), stringsAsFactors = F, header = T)
+  x = as.factor(x$condition)
+  filtered = read.table(paste0("~/Desktop/active_projects/ccbr1032/rawData/filteredCounts/",sample.dir,"/filtered.txt"), stringsAsFactors = F, header = T)
+  deg = read.table(paste0("~/Desktop/active_projects/ccbr1032/analysis/processedData/DEGs/limma_DEG_", limma_DEG,"_all_genes.txt"), stringsAsFactors = F, header = T)
+  deg = deg[order(deg$pvalue, decreasing = T),]
+  control_genes = deg[1:number_of_genes_as_control,1]
+  for (i in 1:ncol(filtered)){
+  filtered[,i] = as.integer(filtered[,i])
+  }
+  set = newSeqExpressionSet(as.matrix(filtered),
+  phenoData = data.frame(x, row.names=colnames(filtered)))
+  set <- RUVg(set, control_genes, k=3)
+  colors <- brewer.pal(3, "Set2")
+  pdf(paste0("results/PCA_RUVseq_",limma_DEG,".pdf"))
+  plotPCA(set, col=colors[x], cex=0.6)
+  dev.off()
+  dds <- DESeqDataSetFromMatrix(countData = counts(set),
+  colData = pData(set),
+  design = ~ W_1 + x)
+  dds <- DESeq(dds)
+  res <- results(dds)
+  #normalized counts
+  ndata=as.data.frame(counts(dds,normalized=TRUE))
+  colnames(ndata)=colnames(filtered)
+  rn=rownames(ndata)
+  ensID=apply(array(as.character(rn)),1,function(z) unlist(strsplit(z, "\\|"))[1])
+  gene=apply(array(as.character(rn)),1,function(z) unlist(strsplit(z, "\\|"))[2])
+  mydata=cbind(ensID,gene,ndata)
+  #reformat DEG table
+  res = data.frame(res)
+  colnames(res)[2] = "log2fc"
+  res$fdr=p.adjust(res$pvalue,method='fdr',n=length(res$pvalue))
+  res$gsea_ranking_score=-log10(res$pvalue)*sign(res$log2fc)
+  res$gene = gsub(".*[|]","", rownames(res))
+  res$fc = 2^res$log2fc
+  down_reg=res$log2fc<0
+  res$fc[down_reg]=-1/res$fc[down_reg]
+  res$ensid_gene = rownames(res)
+  res = res %>% dplyr::select(ensid_gene, gene, fc, log2fc, pvalue, fdr, gsea_ranking_score)
+  write.table(res,file=paste("processedData/DEGs/RUVseq_DEG_",limma_DEG, ".txt",sep=""),row.names=F,quote=FALSE,sep="\t")
+}
+```
+
+```{r}
+myRUVseq(sample.dir = "SF417_Treated_Ctrl",limma_DEG = "treated_417-Ctrl_417",number_of_genes_as_control = 1500)
+myRUVseq(sample.dir = "SF417_Ola_Ctrl",limma_DEG = "Ola_417-Ctrl_417",number_of_genes_as_control = 1500)
+myRUVseq(sample.dir = "SF417_LMP_Ctrl",limma_DEG = "LMP_417-Ctrl_417",number_of_genes_as_control = 1500)
+myRUVseq(sample.dir = "SF417_LMP.Olap_Ola",limma_DEG = "LMP.Olap_417-Ola_417",number_of_genes_as_control = 1500)
+myRUVseq(sample.dir = "SF417_LMP.Olap_LMP",limma_DEG = "LMP.Olap_417-LMP_417",number_of_genes_as_control = 1500)
+myRUVseq(sample.dir = "SF417_LMP.Olap_Ctrl",limma_DEG = "LMP.Olap_417-Ctrl_417",number_of_genes_as_control = 1500)
+
+```
+
+```{r}
+myRUVseq(sample.dir = "GSC827_Treated_Ctrl",limma_DEG = "treated_827-Ctrl_827",number_of_genes_as_control = 3000)
+myRUVseq(sample.dir = "GSC827_Ola_Ctrl",limma_DEG = "Ola_827-Ctrl_827",number_of_genes_as_control = 3000)
+myRUVseq(sample.dir = "GSC827_LMP_Ctrl",limma_DEG = "LMP_827-Ctrl_827",number_of_genes_as_control = 3000)
+myRUVseq(sample.dir = "GSC827_LMP.Olap_Ola",limma_DEG = "LMP.Olap_827-Ola_827",number_of_genes_as_control = 3000)
+myRUVseq(sample.dir = "GSC827_LMP.Olap_LMP",limma_DEG = "LMP.Olap_827-LMP_827",number_of_genes_as_control = 3000)
+myRUVseq(sample.dir = "GSC827_LMP.Olap_Ctrl",limma_DEG = "LMP.Olap_827-Ctrl_827",number_of_genes_as_control = 3000)
+
+```
+
+
+
+#### read in the matrices into a list and modify the names
+```{r read data}
+my_files = list.files(path = DEGs_dir)
+my_degs <- list()
+for (i in my_files){
+  print(i)
+  my_degs[[i]] <- read.table(paste(DEGs_dir,i,sep = "/"),header = TRUE,sep='\t')
+  my_degs[[i]]$ensid_gene <- gsub('\\..*','', my_degs[[i]]$ensid_gene)
+}
+names(my_degs) <- stringr::str_replace(my_files, pattern = "_all_genes.txt", replacement = "") %>% 
+  stringr::str_replace(pattern = "limma_DEG_", replacement = "") %>% stringr::str_replace(pattern = "RUVseq_DEG_", replacement = "")%>% 
+  stringr::str_replace(pattern = ".txt", replacement = "")
+
+```
+
+
+#### rank genes based on gsea_ranking_score, for GO gsea
+```{r calculate degs; rank genes based on gsea_ranking_score, message=FALSE, warning=FALSE}
+my_sig_degs = lapply(my_degs, function(x) subset(x, fdr < 0.05 & abs(fc) > 2))
+
+my_degs_rankingScoresList <- lapply(my_degs, function(x){
+  scores <- x$gsea_ranking_score
+  names(scores) <- as.character(x$ensid_gene)
+  scores <- sort(scores, decreasing = T)
+})
+
+```
+
+#### Mapping DEGs to entrez IDs using ensemble, then symbol, then NCBI web scrapped IDs.  
+```{r Converts EnsemblIDs to UNIPROTID; rank genes based on gsea_ranking_score, message=FALSE, warning=FALSE}
+
+my_genes = data.frame()
+for (x in my_degs) {
+  temp_genes = x[, c("ensid_gene", "gene")]
+  my_genes = dplyr::bind_rows(my_genes, temp_genes)
+  my_genes = my_genes[!(duplicated(my_genes$ensid_gene)),]
+}
+
+Entrez_from_ensembl <- bitr(my_genes$ensid_gene, fromType = "ENSEMBL", toType = "ENTREZID", OrgDb = org.Hs.eg.db)
+colnames(Entrez_from_ensembl)[colnames(Entrez_from_ensembl)=="ENSEMBL"] <- "ensid_gene"
+unmapped_ensid <- my_genes[!(my_genes$ensid_gene%in%Entrez_from_ensembl$ensid_gene),] 
+unmapped_ensid <- unmapped_ensid[!duplicated(unmapped_ensid$gene),]
+ensid_symbol.data <- bitr(unique(unmapped_ensid$gene), fromType = "SYMBOL", toType = "ENTREZID", OrgDb = org.Hs.eg.db)
+ensid_symbol.data <- ensid_symbol.data[!duplicated(ensid_symbol.data$SYMBOL),]
+ensid_symbol_unmapped_ensid.data <- unmapped_ensid[(unmapped_ensid$gene%in%ensid_symbol.data$SYMBOL),]
+Entrez_from_symbol = cbind(ensid_symbol_unmapped_ensid.data, ensid_symbol.data)
+Entrez_from_symbol = Entrez_from_symbol[c("ensid_gene", "ENTREZID")]
+Entrez_all <- dplyr::bind_rows(Entrez_from_ensembl, Entrez_from_symbol)
+Entrez_unmapped = setdiff(my_genes$ensid_gene, Entrez_all$ensid_gene)
+
+paste("Out of all", length(my_genes$ensid_gene), "DEGs:", length(Entrez_from_ensembl$ENTREZID), "were mapped to Entrez using Ensemble ID,", length(Entrez_from_symbol$ENTREZID), "mapped using gene symbol,", length(setdiff(my_genes$ensid_gene, Entrez_all$ensid_gene)), "cannot be mapped.")
+```
+
+#### rank genes based on gsea_ranking_score, for KEGG & Reactome gsea 
+```{r ranking Entrez genes}
+my_degs_entrez = lapply(my_degs, function(x){
+  result <- merge(x, Entrez_all, by="ensid_gene") #adding a entrez column
+})
+
+my_sig_degs_entrez = lapply(my_degs_entrez, function(x) subset(x, fdr < 0.05 & abs(fc) > 2))
+
+my_degs_entrez_rankingScoresList <- lapply(my_degs_entrez, function(x){
+  scores <- x$gsea_ranking_score
+  names(scores) <- as.character(x$ENTREZID)
+  scores <- sort(scores, decreasing = T)
+})
+```
+
+#### volcano plot for differentially expressed genes
+```{r volcano plot DEGs}
+myVolcanos = lapply(my_degs, function(x){
+  EnhancedVolcano(x, 
+                lab = x$gene,x = "log2fc", y = "fdr", ylab = bquote(~-Log[10]~FDR),FCcutoff = 1, 
+                ylim= c(0, max(-log10(x$fdr), na.rm=TRUE) + 1),pCutoff = 0.05,
+                legendPosition = 'top',titleLabSize = 22, subtitleLabSize = 20,
+                captionLabSize= 18,
+                pointSize = 0.8,labSize = 4.5,legendLabSize = 18,
+                legendIconSize = 4,legend = c("NS","log2FC > |1|","FDR < 0.05",
+                           "significant (FDR < 0.05) & log2FC > |1|")) 
+})
+
+
+volcanos = list()
+for (i in 1:length(my_degs)){
+  print(myVolcanos[[i]] + ggtitle(paste(names(myVolcanos[i]))))
+  myVolcanos[[i]] + ggtitle(paste(names(myVolcanos[i])))
+}
+
+for (i in 1:length(my_degs)){
+pdf(paste(results_dir, "volcano_", names(myVolcanos[i]), ".pdf", sep = ""), width = 11, height = 10)
+print(myVolcanos[[i]] + ggtitle(paste(names(myVolcanos[i]))))
+dev.off()
+}
+
+
+```
+
+
+```{r}
+for (i in 1: length(my_degs)){
+  print(paste("Number of DEGS in",names(my_sig_degs[i]), ":", length(my_sig_degs[[i]]$gene), sep=" "))
+}
+```
+
+```{r shortern labels for dotplots, include=FALSE}
+#' Truncate string vector of ggplot axis label
+#'
+#' @param label    a ordered string vector
+#' @param maxLen   max length of character (nchar) to show in label
+#' @param maxWord  max count of words allowed to show in label
+#' @param pattern  Word separater
+#' @param dot      If true, three dots will added to truncated label
+#'
+#' @return a vector of truncated strings
+#' @export
+#'
+#' @examples
+short_label <- function(label, maxLen = 50, maxWord = 10, pattern = " ", dot = TRUE){
+  l <- strsplit(label, pattern)
+  short_label <- vector("character",length(l))
+  
+  for (i in seq_along(l)){
+    truncated <- FALSE
+    s <- l[[i]]
+    if (length(s) > maxWord){
+      ll <- paste(s[1:maxWord], collapse = " ")
+      truncated <- TRUE
+    }
+    else{
+      ll <- paste(s, collapse = " ")
+    }
+    
+    if (nchar(ll) > maxLen){
+      ll <- substr(ll, 1, maxLen)
+      truncated <- TRUE
+    }
+    
+    if (dot & truncated) ll <- paste(ll, "...",sep = " ")
+    
+    short_label[[i]] <- ll
+  }
+  attr(short_label, "pos") <- attr(label,"pos")
+  return(short_label)
+}
+```
+
+#### biological process gsea
+```{r gsea biological process, message=FALSE, warning=FALSE}
+myBP_gsea = lapply(my_degs_rankingScoresList, function(x){
+  gseGO(geneList = x, OrgDb = org.Hs.eg.db, ont = "BP", nPerm = 30000, keyType = "ENSEMBL",
+        minGSSize = 10, maxGSSize = 500, pvalueCutoff = 0.05, pAdjustMethod = "BH",
+        verbose = TRUE)})
+
+for (i in 1:length(myBP_gsea)){
+  if (length(myBP_gsea[[i]]@result$ID)>0){
+    dot.plot =
+    dotplot(myBP_gsea[[i]], showCategory=10, split=".sign") + facet_grid(.~.sign)+ 
+      ggtitle(paste(names(myBP_gsea[i]),"BP GSEA", sep = " ")) + 
+      scale_y_discrete(label=short_label)
+    #ggsave(filename = paste0("processedData/ORA_GSEA/", "myBP_gsea_", ,names(myBP_gsea[i]), ".pdf"),plot =  dot.plot,)
+    pdf(file = paste0("processedData/ORA_GSEA/", "myBP_gsea_", names(myBP_gsea[i]), ".pdf"), width = 10)
+    print(dot.plot)
+    dev.off()
+  }
+}
+
+for (i in 1:length(myBP_gsea)){
+  myBP_gsea[[i]] = setReadable(myBP_gsea[[i]], 'org.Hs.eg.db', 'ENSEMBL')
+  writeFile(myBP_gsea[[i]], paste0("myBP_gsea_",names(myBP_gsea[i]),".csv"))
+}
+```
+
+```{r}
+# myBP_LMP_Ctrl = myBP_gsea[c("LMP_602-Ctrl_602","LMP_923-Ctrl_923","LMP_827-Ctrl_827","LMP_417-Ctrl_417")]
+# myBP_LMP_Ctrl = c(myBP_LMP_Ctrl$`LMP_602-Ctrl_602`@result$Description, myBP_LMP_Ctrl$`LMP_923-Ctrl_923`@result$Description,
+#                   myBP_LMP_Ctrl$`LMP_827-Ctrl_827`@result$Description,myBP_LMP_Ctrl$`LMP_417-Ctrl_417`@result$Description)
+
+myPathwayPlot = function(contrast1, contrast2, my.bp.gsea){
+  cell.1 = gsub(".*_","",contrast1)
+  cell.2 = gsub(".*_","",contrast2)
+  myPathway = my.bp.gsea[c(contrast1, contrast2)]
+  myPathway2 = c(myPathway[[contrast1]]@result$Description, myPathway[[contrast2]]@result$Description)
+  print(length(myPathway2))
+  myPathway3 = table(myPathway2) %>% data.frame() 
+  myPathway4 = myPathway3[which(myPathway3$Freq==2),]
+  c1 = myPathway[[contrast1]]@result[which(myPathway[[contrast1]]@result$Description%in%myPathway4[,1]),]
+  c1 = c1[c("Description", "NES")]
+  c2 = myPathway[[contrast2]]@result[which(myPathway[[contrast2]]@result$Description%in%myPathway4[,1]),]
+  c2 = c2[c("Description", "NES")]
+  colnames(c1)[2] = paste0(colnames(c1)[2], "_", cell.1)
+  colnames(c2)[2] = paste0(colnames(c2)[2], "_", cell.2)
+  merged = merge(c1, c2,  by="Description")
+  print(dim(merged))
+  merged = melt(merged)
+
+  colnames(merged) = c("Description", "cell_line", "Net_Enrichment_Score") 
+  merged$cell_line = gsub("NES_","",merged$cell_line)
+  p1 = 
+  ggplot(merged, aes(x = Description, y=Net_Enrichment_Score, fill=cell_line)) + geom_bar(stat = "identity", position = "dodge") + coord_flip()+ 
+          scale_x_discrete(label=short_label)
+  pdf(file = paste0("results/pathways_", deparse(substitute(my.bp.gsea)), "_",contrast1,"_",contrast2, ".pdf"))
+  print(p1)
+  dev.off()
+}
+
+
+
+myPathwayPlot(contrast1 = "LMP_923-Ctrl_923", contrast2 = "LMP_827-Ctrl_827", my.bp.gsea = myBP_gsea)
+myPathwayPlot(contrast1 = "Ola_923-Ctrl_923", contrast2 = "Ola_827-Ctrl_827", my.bp.gsea = myBP_gsea)
+myPathwayPlot(contrast1 = "LMP.Olap_923-Ctrl_923", contrast2 = "LMP.Olap_827-Ctrl_827", my.bp.gsea = myBP_gsea)
+myPathwayPlot(contrast1 = "LMP.Olap_923-Ola_923", contrast2 = "LMP.Olap_827-Ola_827", my.bp.gsea = myBP_gsea)
+myPathwayPlot(contrast1 = "LMP.Olap_923-LMP_923", contrast2 = "LMP.Olap_827-LMP_827", my.bp.gsea = myBP_gsea)
+
+myPathwayPlot(contrast1 = "LMP_417-Ctrl_417", contrast2 = "LMP_602-Ctrl_602", my.bp.gsea = myBP_gsea)
+myPathwayPlot(contrast1 = "Ola_417-Ctrl_417", contrast2 = "Ola_602-Ctrl_602", my.bp.gsea = myBP_gsea)
+myPathwayPlot(contrast1 = "LMP.Olap_417-Ctrl_417", contrast2 = "LMP.Olap_602-Ctrl_602", my.bp.gsea = myBP_gsea)
+myPathwayPlot(contrast1 = "LMP.Olap_417-Ola_417", contrast2 = "LMP.Olap_602-Ola_602", my.bp.gsea = myBP_gsea)
+myPathwayPlot(contrast1 = "LMP.Olap_417-LMP_417", contrast2 = "LMP.Olap_602-LMP_602", my.bp.gsea = myBP_gsea)
+
+myPathwayPlot(contrast1 = "LMP_923-Ctrl_923", contrast2 = "LMP_827-Ctrl_827", my.bp.gsea = myKEGG_gsea)
+myPathwayPlot(contrast1 = "Ola_923-Ctrl_923", contrast2 = "Ola_827-Ctrl_827", my.bp.gsea = myKEGG_gsea)
+myPathwayPlot(contrast1 = "LMP.Olap_923-Ctrl_923", contrast2 = "LMP.Olap_827-Ctrl_827", my.bp.gsea = myKEGG_gsea)
+myPathwayPlot(contrast1 = "LMP.Olap_923-Ola_923", contrast2 = "LMP.Olap_827-Ola_827", my.bp.gsea = myKEGG_gsea)
+myPathwayPlot(contrast1 = "LMP.Olap_923-LMP_923", contrast2 = "LMP.Olap_827-LMP_827", my.bp.gsea = myKEGG_gsea)
+
+myPathwayPlot(contrast1 = "LMP_417-Ctrl_417", contrast2 = "LMP_602-Ctrl_602", my.bp.gsea = myKEGG_gsea)
+myPathwayPlot(contrast1 = "Ola_417-Ctrl_417", contrast2 = "Ola_602-Ctrl_602", my.bp.gsea = myKEGG_gsea)
+myPathwayPlot(contrast1 = "LMP.Olap_417-Ctrl_417", contrast2 = "LMP.Olap_602-Ctrl_602", my.bp.gsea = myKEGG_gsea)
+myPathwayPlot(contrast1 = "LMP.Olap_417-Ola_417", contrast2 = "LMP.Olap_602-Ola_602", my.bp.gsea = myKEGG_gsea)
+myPathwayPlot(contrast1 = "LMP.Olap_417-LMP_417", contrast2 = "LMP.Olap_602-LMP_602", my.bp.gsea = myKEGG_gsea)
+
+
+myPathwayPlot(contrast1 = "LMP_923-Ctrl_923", contrast2 = "LMP_827-Ctrl_827", my.bp.gsea = myReactome_gsea)
+myPathwayPlot(contrast1 = "Ola_923-Ctrl_923", contrast2 = "Ola_827-Ctrl_827", my.bp.gsea = myReactome_gsea)
+myPathwayPlot(contrast1 = "LMP.Olap_923-Ctrl_923", contrast2 = "LMP.Olap_827-Ctrl_827", my.bp.gsea = myReactome_gsea)
+myPathwayPlot(contrast1 = "LMP.Olap_923-Ola_923", contrast2 = "LMP.Olap_827-Ola_827", my.bp.gsea = myReactome_gsea)
+myPathwayPlot(contrast1 = "LMP.Olap_923-LMP_923", contrast2 = "LMP.Olap_827-LMP_827", my.bp.gsea = myReactome_gsea)
+
+myPathwayPlot(contrast1 = "LMP_417-Ctrl_417", contrast2 = "LMP_602-Ctrl_602", my.bp.gsea = myReactome_gsea)
+myPathwayPlot(contrast1 = "Ola_417-Ctrl_417", contrast2 = "Ola_602-Ctrl_602", my.bp.gsea = myReactome_gsea)
+myPathwayPlot(contrast1 = "LMP.Olap_417-Ctrl_417", contrast2 = "LMP.Olap_602-Ctrl_602", my.bp.gsea = myReactome_gsea)
+myPathwayPlot(contrast1 = "LMP.Olap_417-Ola_417", contrast2 = "LMP.Olap_602-Ola_602", my.bp.gsea = myReactome_gsea)
+myPathwayPlot(contrast1 = "LMP.Olap_417-LMP_417", contrast2 = "LMP.Olap_602-LMP_602", my.bp.gsea = myReactome_gsea)
+
+```
+
+
+```{r}
+myBP_LMP_Ctrl = myBP_gsea[c("LMP_923-Ctrl_923","LMP_827-Ctrl_827")]
+myBP_LMP_Ctrl2 = c(myBP_LMP_Ctrl$`LMP_923-Ctrl_923`@result$Description,
+                  myBP_LMP_Ctrl$`LMP_827-Ctrl_827`@result$Description)
+
+myBP_LMP_Ctrl3 = table(myBP_LMP_Ctrl2)%>% data.frame() 
+#myBP_LMP_Ctrl[order(myBP_LMP_Ctrl$Freq, decreasing = T),]
+myBP_LMP_Ctrl4 = myBP_LMP_Ctrl3[which(myBP_LMP_Ctrl3$Freq==2),]
+
+L923 = myBP_LMP_Ctrl$`LMP_923-Ctrl_923`@result[which(myBP_LMP_Ctrl$`LMP_923-Ctrl_923`@result$Description%in%myBP_LMP_Ctrl4$myBP_LMP_Ctrl2),]
+L827 = myBP_LMP_Ctrl$`LMP_827-Ctrl_827`@result[which(myBP_LMP_Ctrl$`LMP_827-Ctrl_827`@result$Description%in%myBP_LMP_Ctrl4$myBP_LMP_Ctrl2),]
+
+
+
+colnames(L923)[5] = "NES_923"
+colnames(L827)[5] = "NES_827"
+# colnames(L923)[7] = "padj_923"
+# colnames(L827)[7] = "padj_827"
+
+LMP_Ctrl = merge(L923, L827, by="Description") 
+LMP_Ctrl = LMP_Ctrl[c("Description", "NES_923", "NES_827")]
+
+#library(tidyr)
+
+LMP_Ctrl = melt(LMP_Ctrl)
+
+colnames(LMP_Ctrl) = c("Description", "cell_line", "Net_Enrichment_Score") 
+LMP_Ctrl$cell_line = gsub("NES_","",LMP_Ctrl$cell_line)
+ggplot(LMP_Ctrl, aes(x = Description, y=Net_Enrichment_Score, fill=cell_line)) + geom_bar(stat = "identity", position = "dodge") + coord_flip()+ 
+   scale_color_gradient(low="blue", high="red")
+
+
+```
+
+
+
+#### KEGG gsea
+```{r}
+myKEGG_gsea <- lapply(my_degs_entrez_rankingScoresList, function(x){
+  gseKEGG(geneList = x, organism = 'hsa', nPerm = 30000,minGSSize = 10, maxGSSize = 500, pvalueCutoff = 0.05, pAdjustMethod = "BH", verbose = TRUE)})
+
+dotplot(myKEGG_gsea[[3]], showCategory=10, split=".sign") + facet_grid(.~.sign)+ ggtitle(paste(names(myKEGG_gsea[3]),"Gene set enrichment analysis", sep = " ")) + scale_y_discrete(label=short_label)
+
+for (i in 1:length(myKEGG_gsea)){
+  myKEGG_gsea[[i]] = setReadable(myKEGG_gsea[[i]], 'org.Hs.eg.db', 'ENTREZID')
+  writeFile(myKEGG_gsea[[i]], paste0("myKEGG_gsea_",names(myKEGG_gsea[i]),".csv"))
+  if (length(myKEGG_gsea[[i]]@result$ID)>0){
+    dot.plot = 
+      dotplot(myKEGG_gsea[[i]], showCategory=10, split=".sign") + facet_grid(.~.sign)+ 
+      ggtitle(paste(names(myKEGG_gsea[i]),"KEGG GSEA", sep = " ")) + 
+      scale_y_discrete(label=short_label)
+      pdf(file = paste0("processedData/ORA_GSEA/", "myKEGG_gsea_", names(myKEGG_gsea[i]), ".pdf"), width = 10)
+      print(dot.plot)
+      dev.off()
+  }
+}
+```
+
+#### Reactome gsea
+```{r}
+myReactome_gsea <- lapply(my_degs_entrez_rankingScoresList, function(x){
+  gsePathway(geneList = x, organism = 'human', nPerm = 30000, minGSSize = 10, maxGSSize = 500, pvalueCutoff = 0.05, pAdjustMethod = "BH", verbose = TRUE)})
+
+
+for (i in 1:length(myReactome_gsea)){
+  myReactome_gsea[[i]] = setReadable(myReactome_gsea[[i]], 'org.Hs.eg.db', 'ENTREZID')
+  writeFile(myReactome_gsea[[i]], paste0("myReactome_gsea_",names(myReactome_gsea[i]),".csv"))
+  if (length(myReactome_gsea[[i]]@result$ID)>0){
+    dot.plot = 
+      dotplot(myReactome_gsea[[i]], showCategory=10, split=".sign") + facet_grid(.~.sign)+ 
+      ggtitle(paste(names(myReactome_gsea[i]),"Reactome GSEA", sep = " ")) + 
+      scale_y_discrete(label=short_label)
+      pdf(file = paste0("processedData/ORA_GSEA/", "myReactome_gsea_", names(myReactome_gsea[i]), ".pdf"), width = 10)
+      print(dot.plot)
+      dev.off()
+  }
+}
+```
+
+
+
+```{r}
+my_sig_degs_LMP_Ctrl = my_sig_degs[which(names(my_sig_degs)%in%c("LMP_417-Ctrl_417","LMP_602-Ctrl_602","LMP_827-Ctrl_827","LMP_923-Ctrl_923"))]
+my_sig_degs_Ola_Ctrl = my_sig_degs[which(names(my_sig_degs)%in%c("Ola_417-Ctrl_417","Ola_602-Ctrl_602","Ola_827-Ctrl_827","Ola_923-Ctrl_923"))]
+my_sig_degs_LMP.Olap_Ctrl = my_sig_degs[which(names(my_sig_degs)%in%c("LMP.Olap_417-Ctrl_417","LMP.Olap_602-Ctrl_602","LMP.Olap_827-Ctrl_827","LMP.Olap_923-Ctrl_923"))]
+my_sig_degs_LMP.Olap_Ola = my_sig_degs[which(names(my_sig_degs)%in%c("LMP.Olap_417-Ola_417","LMP.Olap_602-Ola_602","LMP.Olap_827-Ola_827","LMP.Olap_923-Ola_923"))]
+my_sig_degs_LMP.Olap_LMP = my_sig_degs[which(names(my_sig_degs)%in%c("LMP.Olap_417-LMP_417","LMP.Olap_602-LMP_602","LMP.Olap_827-LMP_827","LMP.Olap_923-LMP_923"))]
+
+myVenn = function(sigDeg, name){
+venn.plot <- venn.diagram(list(sigDeg[[1]]$gene,
+                                     sigDeg[[2]]$gene,
+                                     sigDeg[[3]]$gene,
+                                     sigDeg[[4]]$gene), NULL, 
+                                fill=c("blue", "red","grey","green"), lwd = 1, cat.cex = 2,
+                                alpha=c(0.5,0.5,0.5,0.5), cex = 3, cat.fontface=4, 
+                                category.names=c(paste(names(sigDeg[1])),
+                                                 paste(names(sigDeg[2])),
+                                                 paste(names(sigDeg[3])),
+                                                 paste(names(sigDeg[4]))))
+
+pdf(file = paste0("results/", name), width = 22, height = 14)
+grid.draw(venn.plot)
+dev.off()
+}
+
+myVenn(sigDeg = my_sig_degs_LMP_Ctrl, name = "venn_LMP-Ctrl.pdf")
+myVenn(sigDeg = my_sig_degs_Ola_Ctrl, name = "venn_Ola-Ctrl.pdf")
+myVenn(sigDeg = my_sig_degs_LMP.Olap_Ctrl, name = "venn_LMP.Olap-Ctrl.pdf")
+myVenn(sigDeg = my_sig_degs_LMP.Olap_Ola, name = "venn_LMP.Olap-Ola.pdf")
+myVenn(sigDeg = my_sig_degs_LMP.Olap_LMP, name = "venn_LMP.Olap-LMP.pdf")
+
+```
+
+
+
+
+
+```{r}
+x_417 = read.table("~/Desktop/active_projects/ccbr1032/rawData/filteredCounts/SF417_Treated_Ctrl/sampletable.txt", stringsAsFactors = F, header = T)
+
+x = as.factor(x_417$condition)
+
+filtered_417 = read.table("~/Desktop/active_projects/ccbr1032/rawData/filteredCounts/SF417_Treated_Ctrl/filtered.txt", stringsAsFactors = F, header = T)
+
+deg_417 = read.table("~/Desktop/active_projects/ccbr1032/analysis/processedData/DEGs/limma_DEG_treated_417-Ctrl_417_all_genes.txt", stringsAsFactors = F, header = T)
+
+
+deg_417 = deg_417[order(deg_417$pvalue, decreasing = T),]
+
+gene_417_200th = deg_417[1:200,1]
+gene_417_500th = deg_417[1:500,1]
+gene_417_1500th = deg_417[1:1500,1]
+gene_417_3000th = deg_417[1:3000,1]
+gene_417_13000th = deg_417[1:13000,1]
+gene_417_sig = deg_417[length(deg_417$ensid_gene)-100:length(deg_417$ensid_gene),1]
+
+```
+
+```{r}
+for (i in 1:ncol(filtered_417)){
+  filtered_417[,i] = as.integer(filtered_417[,i])
+}
+
+
+set_417 = newSeqExpressionSet(as.matrix(filtered_417),
+phenoData = data.frame(x, row.names=colnames(filtered_417)))
+
+library(RColorBrewer)
+colors <- brewer.pal(3, "Set2")
+plotRLE(set_417, outline=FALSE, col=colors[x])
+plotPCA(set_417, col=colors[x], cex=0.5)
+
+set_417 <- betweenLaneNormalization(set_417, which="upper")
+plotRLE(set_417, outline=FALSE, ylim=c(-4, 4), col=colors[x])
+plotPCA(set_417, col=colors[x], cex=0.5)
+
+```
+
+### The number of factors of unwanted variation to be estimated from the data.
+### usually a few (2-3) factors are enough to capture the unwanted variation
+
+```{r}
+set0_417 <- RUVg(set_417, gene_417_200th, k=3)
+set2_417 <- RUVg(set_417, gene_417_500th, k=3)
+set3_417 <- RUVg(set_417, gene_417_1500th, k=3)
+set4_417 <- RUVg(set_417, gene_417_3000th, k=3)
+set5_417 <- RUVg(set_417, gene_417_13000th, k=3)
+set6_417 <- RUVg(set_417, gene_417_sig, k=3)
+
+
+```
+
+
+```{r}
+plotPCA(set0_417, col=colors[x], cex=0.6)
+plotPCA(set2_417, col=colors[x], cex=0.6)
+plotPCA(set3_417, col=colors[x], cex=0.6)
+plotPCA(set4_417, col=colors[x], cex=0.6)
+plotPCA(set5_417, col=colors[x], cex=0.6)
+plotPCA(set6_417, col=colors[x], cex=0.6)
+
+```
+
+
+
+
+
+
+# 602
+```{r}
+x_602 = read.table("~/Desktop/active_projects/ccbr1032/rawData/filteredCounts/SF602_Treated_Ctrl/sampletable.txt", stringsAsFactors = F, header = T)
+
+x = as.factor(x_602$condition)
+
+filtered_602 = read.table("~/Desktop/active_projects/ccbr1032/rawData/filteredCounts/SF602_Treated_Ctrl/filtered.txt", stringsAsFactors = F, header = T)
+
+deg_602 = read.table("~/Desktop/active_projects/ccbr1032/analysis/processedData/DEGs/limma_DEG_treated_602-Ctrl_602_all_genes.txt", stringsAsFactors = F, header = T)
+
+
+deg_602 = deg_602[order(deg_602$pvalue, decreasing = T),]
+
+gene_602_200th = deg_602[1:200,1]
+gene_602_500th = deg_602[1:500,1]
+gene_602_1500th = deg_602[1:1500,1]
+gene_602_3000th = deg_602[1:3000,1]
+gene_602_13000th = deg_602[1:13000,1]
+gene_602_sig = deg_602[length(deg_602$ensid_gene)-100:length(deg_602$ensid_gene),1]
+
+```
+
+```{r}
+for (i in 1:ncol(filtered_602)){
+  filtered_602[,i] = as.integer(filtered_602[,i])
+}
+
+
+set_602 = newSeqExpressionSet(as.matrix(filtered_602),
+phenoData = data.frame(x, row.names=colnames(filtered_602)))
+
+library(RColorBrewer)
+colors <- brewer.pal(3, "Set2")
+plotRLE(set_602, outline=FALSE, col=colors[x])
+plotPCA(set_602, col=colors[x], cex=0.5)
+
+set_602 <- betweenLaneNormalization(set_602, which="upper")
+plotRLE(set_602, outline=FALSE, ylim=c(-4, 4), col=colors[x])
+plotPCA(set_602, col=colors[x], cex=0.5)
+
+```
+
+### The number of factors of unwanted variation to be estimated from the data.
+### usually a few (2-3) factors are enough to capture the unwanted variation
+
+```{r}
+set0_602 <- RUVg(set_602, gene_602_200th, k=3)
+set2_602 <- RUVg(set_602, gene_602_500th, k=3)
+set3_602 <- RUVg(set_602, gene_602_1500th, k=3)
+set4_602 <- RUVg(set_602, gene_602_3000th, k=3)
+set5_602 <- RUVg(set_602, gene_602_13000th, k=3)
+set6_602 <- RUVg(set_602, gene_602_sig, k=3)
+
+
+```
+
+
+```{r}
+plotPCA(set0_602, col=colors[x], cex=0.6)
+plotPCA(set2_602, col=colors[x], cex=0.6)
+plotPCA(set3_602, col=colors[x], cex=0.6)
+plotPCA(set4_602, col=colors[x], cex=0.6)
+plotPCA(set5_602, col=colors[x], cex=0.6)
+plotPCA(set6_602, col=colors[x], cex=0.6)
+
+```
+
+
+
+
+# 827
+```{r}
+x_827 = read.table("~/Desktop/active_projects/ccbr1032/rawData/filteredCounts/GSC827_Treated_Ctrl/sampletable.txt", stringsAsFactors = F, header = T)
+
+x = as.factor(x_827$condition)
+
+filtered_827 = read.table("~/Desktop/active_projects/ccbr1032/rawData/filteredCounts/GSC827_Treated_Ctrl/filtered.txt", stringsAsFactors = F, header = T)
+
+deg_827 = read.table("~/Desktop/active_projects/ccbr1032/analysis/processedData/DEGs/limma_DEG_treated_827-Ctrl_827_all_genes.txt", stringsAsFactors = F, header = T)
+
+
+deg_827 = deg_827[order(deg_827$pvalue, decreasing = T),]
+
+gene_827_200th = deg_827[1:200,1]
+gene_827_500th = deg_827[1:500,1]
+gene_827_1500th = deg_827[1:1500,1]
+gene_827_3000th = deg_827[1:3000,1]
+gene_827_13000th = deg_827[1:13000,1]
+gene_827_sig = deg_827[length(deg_827$ensid_gene)-100:length(deg_827$ensid_gene),1]
+
+```
+
+```{r}
+for (i in 1:ncol(filtered_827)){
+  filtered_827[,i] = as.integer(filtered_827[,i])
+}
+
+
+set_827 = newSeqExpressionSet(as.matrix(filtered_827),
+phenoData = data.frame(x, row.names=colnames(filtered_827)))
+
+library(RColorBrewer)
+colors <- brewer.pal(3, "Set2")
+plotRLE(set_827, outline=FALSE, col=colors[x])
+plotPCA(set_827, col=colors[x], cex=0.5)
+
+set_827 <- betweenLaneNormalization(set_827, which="upper")
+plotRLE(set_827, outline=FALSE, ylim=c(-4, 4), col=colors[x])
+plotPCA(set_827, col=colors[x], cex=0.5)
+
+```
+
+### The number of factors of unwanted variation to be estimated from the data.
+### usually a few (2-3) factors are enough to capture the unwanted variation
+
+```{r}
+set0_827 <- RUVg(set_827, gene_827_200th, k=3)
+set2_827 <- RUVg(set_827, gene_827_500th, k=3)
+set3_827 <- RUVg(set_827, gene_827_1500th, k=3)
+set4_827 <- RUVg(set_827, gene_827_3000th, k=3)
+set5_827 <- RUVg(set_827, gene_827_13000th, k=3)
+set6_827 <- RUVg(set_827, gene_827_sig, k=3)
+
+
+```
+
+
+```{r}
+plotPCA(set0_827, col=colors[x], cex=0.6)
+plotPCA(set2_827, col=colors[x], cex=0.6)
+plotPCA(set3_827, col=colors[x], cex=0.6)
+plotPCA(set4_827, col=colors[x], cex=0.6)
+plotPCA(set5_827, col=colors[x], cex=0.6)
+plotPCA(set6_827, col=colors[x], cex=0.6)
+
+```
+
+

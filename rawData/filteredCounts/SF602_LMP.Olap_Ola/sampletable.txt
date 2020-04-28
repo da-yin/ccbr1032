@@ -1,0 +1,5 @@
+sampleName	fileName	condition	label	batch
+1	Ola_602_R1B1	Ola_602_R1B1	Ola_602	Ola_602_R1B1	1
+2	LMP.Olap_602_R1B1	LMP.Olap_602_R1B1	LMP.Olap_602	LMP.Olap_602_R1B1	1
+3	Ola_602_R2B2	Ola_602_R2B2	Ola_602	Ola_602_R2B2	2
+4	LMP.Olap_602_R2B2	LMP.Olap_602_R2B2	LMP.Olap_602	LMP.Olap_602_R2B2	2

@@ -1,0 +1,7 @@
+sampleName	fileName	condition	label	batch
+1	Ctrl_417_R1B1	Ctrl_417_R1B1	Ctrl_417	Ctrl_417_R1B1	1
+2	Ola_417_R1B1	Ola_417_R1B1	Ola_417	Ola_417_R1B1	1
+3	Ctrl_417_R2B2	Ctrl_417_R2B2	Ctrl_417	Ctrl_417_R2B2	2
+4	Ola_417_R2B2	Ola_417_R2B2	Ola_417	Ola_417_R2B2	2
+5	Ctrl_417_R3B2	Ctrl_417_R3B2	Ctrl_417	Ctrl_417_R3B2	2
+6	Ola_417_R3B2	Ola_417_R3B2	Ola_417	Ola_417_R3B2	2
